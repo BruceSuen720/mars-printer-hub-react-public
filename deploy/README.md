@@ -11,6 +11,8 @@
 | `nginx.conf` | 前端 nginx 配置，静态资源 + `/api` 反代 + 配置回退 |
 | `sync-configs.sh` | 把云端耗材配置同步到本地 `../config-backup`，供断网回退 |
 | `backup-mysql.sh` | 备份 `mars_printer_hub` 数据库，gzip 压缩并按份数/天数清理 |
+| `coldbackup-mysql.sh` | mysql 数据目录的文件级冷备（tar.gz），停库保证一致 |
+| `upload-backup-115.sh` | 把备份上传到 115 网盘（CloudFS 挂载），md5 校验 |
 | `.env.example` | 环境变量模板，复制为 `.env` 后填写 |
 
 ## 快速开始
@@ -90,11 +92,51 @@ deploy/backup-mysql.sh
 
 ## crontab 示例
 
+## 异地备份：115 网盘
+
+NAS 上已通过 CloudFS 挂载 115 网盘（`/vol1/1000/clouddrive/115-036`）。`upload-backup-115.sh`
+把本地备份同步过去，作为 NAS 之外的第二份副本：
+
+```bash
+deploy/upload-backup-115.sh
+```
+
+- 先写 `.part` 临时文件，md5 与源文件一致才改名为正式文件——网盘上不会出现半截备份
+- 已存在同名文件则跳过，不重复上传
+- 挂载点不存在时直接跳过并告警，**不影响本地备份流程**
+- 逻辑备份保留 14 份，冷备保留 2 份（冷备体积大，避免占满网盘）
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `NETDISK_MOUNT_DIR` | `/vol1/1000/clouddrive/115-036` | 115 挂载点 |
+| `NETDISK_REMOTE_DIR` | `<挂载点>/save/mars-printer-backup` | 备份存放目录 |
+| `UPLOAD_KEEP` | `14` | 网盘上逻辑备份保留份数 |
+| `COLD_KEEP` | `2` | 网盘上冷备保留份数 |
+
+> 变量名不能以数字开头——`115_MOUNT_DIR` 这种写法在 dash 下会报 `Bad substitution`。
+
+## 数据目录冷备
+
+`coldbackup-mysql.sh` 在 `mysqldump` 之外再存一份 mysql 数据目录的 tar.gz：
+
+```bash
+deploy/coldbackup-mysql.sh
+```
+
+它会**停掉 mysql 容器**再打包，保证 InnoDB 数据文件一致（9.4MB 数据目录压到约 6.2MB，
+停库约 7 秒），无论成功失败都会把容器拉起来。保留最近 4 份。
+
+## crontab 示例
+
 ```cron
 # 耗材配置同步：云端 -> 本地缓存（断网时 /config/ 回退）
 17 * * * * /vol1/1000/docker/mars-printer-hub/deploy/sync-configs.sh >> /vol1/1000/docker/mars-printer-hub/config-backup/sync.log 2>&1
 # 数据库备份：每天 03:30，保留最近 14 份
 30 3 * * * /vol1/1000/docker/mars-printer-hub/deploy/backup-mysql.sh >> /vol1/1000/docker/mars-printer-hub/backups/backup.log 2>&1
+# 备份上传到 115 网盘：每天 04:00
+0 4 * * * /vol1/1000/docker/mars-printer-hub/deploy/upload-backup-115.sh >> /vol1/1000/docker/mars-printer-hub/backups/upload.log 2>&1
+# 数据目录冷备：每周日 04:30，保留最近 4 份
+30 4 * * 0 /vol1/1000/docker/mars-printer-hub/deploy/coldbackup-mysql.sh >> /vol1/1000/docker/mars-printer-hub/backups/coldbackup.log 2>&1
 ```
 
 ## 打印机接入
