@@ -52,6 +52,8 @@ docker run -e ENABLE_DEVICE_OVERVIEW=true -p 8080:80 <image>
 
 生产环境需要提供 Nginx 配置，将前端路由回退到 `index.html`，并将 `/api` 转发到后端。
 
+完整的 Docker Compose 编排（后端 + 前端 + MySQL + Redis）、Nginx 配置与耗材配置缓存脚本见 [`deploy/`](deploy/)，其中也说明了 Nginx 变量被 shell 展开会导致容器无限重启的坑。
+
 ## API 客户端
 
 `src/api/` 由 `@umijs/openapi` 生成，不应手动修改；`src/api/objectStorage.ts` 是生成过程保留的例外。重新生成前应确保后端 OpenAPI 地址可访问：
